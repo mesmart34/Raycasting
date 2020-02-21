@@ -150,8 +150,8 @@ void render(SDL_Renderer* renderer, player* player)
 			player->dir.x + player->plane.x * camera_x, 
 			player->dir.y + player->plane.y * camera_x
 		);
-		float mapX = (int)player->pos.x;
-		float mapY = (int)player->pos.y;
+		float mapX = (int)floorf(player->pos.x);
+		float mapY = (int)floorf(player->pos.y);
 		vec2 side_dist = vec2(0, 0);
 		vec2 delta_dist = vec2(
 			sqrtf(1.0f + (ray_dir.y * ray_dir.y) / (ray_dir.x * ray_dir.x)),
@@ -187,6 +187,7 @@ void render(SDL_Renderer* renderer, player* player)
 			side_dist.y = 20000;
 		}
 		int hit = 0;
+		int door = 0;
 		while (hit == 0)
 		{
 			if (side_dist.x < side_dist.y)
@@ -199,32 +200,84 @@ void render(SDL_Renderer* renderer, player* player)
 				mapY += step_y;
 				side = 1.0f;
 			}
-			if (map[(int)mapX][(int)mapY] > 0) hit = 1;
+			if (map[(int)mapX][(int)mapY] > 0)
+			{
+				if (map[(int)mapX][(int)mapY] == 5)
+				{
+					float map_x2 = mapX;
+					float map_y2 = mapY;
+					if (player->pos.x < mapX) map_x2 -= 1;
+					if (player->pos.y > mapY) map_y2 += 1;
+					float adj = 1;
+					float ray_mult = 1;
+					if (side == 1)
+					{
+						adj = map_y2 - player->pos.y;
+						ray_mult = adj / ray_dir.y;
+					}
+					else {
+						adj = (map_x2 - player->pos.x) + 1.0f;
+						ray_mult = adj / ray_dir.x;
+					}
+					float rxe2 = player->pos.x + ray_dir.x * ray_mult;
+					float rye2 = player->pos.y + ray_dir.y * ray_mult;
+					float true_delta_x = sqrtf(1.0f + ray_dir.y * ray_dir.y / ray_dir.x * ray_dir.x);
+					float true_delta_y = sqrtf(1.0f + ray_dir.x * ray_dir.x / ray_dir.y * ray_dir.y);
+					if (fabs(ray_dir.x) < 0.01f)
+						true_delta_x = 100.0f;
+					if (fabs(ray_dir.y) < 0.01f)
+						true_delta_y = 100.0f;
+					if (side == 0)
+					{
+						float true_y_step = sqrtf(true_delta_x * true_delta_x - 1.0f);
+						float half_step_y = rye2 + (step_y * true_y_step) / 2.0f;
+						if (floorf(half_step_y) == mapY)
+						{
+							door = 1; 
+							hit = 1;
+						}
+					}
+					else if (side == 1)
+					{
+						float true_x_step = sqrtf(true_delta_y * true_delta_y - 1.0f);
+						float half_step_x = rxe2 + (step_x * true_x_step) / 2.0f;
+						if (floorf(half_step_x) == mapX)
+						{
+							hit = 1;
+							door = 1;
+						}
+					}
+				}
+				else 
+					hit = 1;
+			}
 		}
-		if (side == 0) 
+		if (side == 0)
+		{
+			if (map[(int)floorf(mapX)][(int)floorf(mapY)] == 5)
+				mapX += step_x / 2.0f;
 			distance = (mapX - player->pos.x + (1.0f - step_x) / 2.0f) / ray_dir.x;
-		else           
+		}
+		else
+		{
+			if (map[(int)floorf(mapX)][(int)floorf(mapY)] == 5)
+				mapY += step_y / 2.0f;
 			distance = (mapY - player->pos.y + (1.0f - step_y) / 2.0f) / ray_dir.y;
-		if (map[(int)mapX][(int)mapY] == 5)
-			distance += 0.4;
-		int wall_height = (int)(WALL_HEIGHT / distance);
+		}
+		int wall_height = (int)floorf(WALL_HEIGHT / distance);
 		float brightness;
-		//brightness = (5.0f - vec2::distance(player->pos, vec2(mapX, mapY))) / 5.0f;
 		brightness = (5.0f - distance) / 5.0f;
 		if (brightness < 0) brightness = 0;
 		if (brightness > 1) brightness = 1;
-		//brightness = floor(brightness * 32) * 8;
 		SDL_Color render_color = { brightness * 255, brightness * 255, brightness * 255, 255 };
-		if (map[(int)mapX][(int)mapY] == 5) {
-			render_color.r *= 0.2f;
-			render_color.g *= 0.8f;
-			render_color.b *= 0.1f;
-			render_color.a *= 1.0f;
+		if (door) {
+			render_color.r *= 0.5f;
+			render_color.g *= 0.5f;
+			render_color.b *= 0.5f;
+			render_color.a *= 0.5f;
 		}
-		
-		
-		
-		//if (map[mapX][mapY] == 5) render_color = { (Uint8)(brightness * 0.5f), (Uint8)(brightness * 0.2f), (Uint8)(brightness * 0.8f), 255 };
+		/*if (door)
+			render_color.g *= 0.2f;*/
 		SDL_SetRenderDrawColor(renderer, render_color.r, render_color.g, render_color.b, render_color.a);
 		SDL_RenderDrawLine(renderer, x, RENDER_HEIGHT / 2 - wall_height, x, RENDER_HEIGHT / 2 + wall_height);
 	}
