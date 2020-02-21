@@ -55,20 +55,22 @@ void handle_mouse(SDL_Window* window, SDL_MouseMotionEvent* event, player* playe
 	static int xpos = 0; 
 	static int ypos = 0;
 	xpos = event->xrel;
-	ypos = event->yrel;
-	player->angle = xpos * player->rot_speed;
+	ypos = event->yrel;	
+	float angle = xpos * player->rot_speed;
+	
 	vec2 old_dir = player->dir;
 	player->dir = vec2(
-		player->dir.x * cosf(-player->angle) - player->dir.y * sinf(-player->angle),
-		old_dir.x * sinf(-player->angle) + player->dir.y * cosf(-player->angle)
+		player->dir.x * cosf(-angle) - player->dir.y * sinf(-angle),
+		old_dir.x * sinf(-angle) + player->dir.y * cosf(-angle)
 	);
+	player->angle = atan2(player->dir.y, player->dir.x);
 	vec2 old_plane = player->plane;
 	player->plane = vec2(
-		player->plane.x * cosf(-player->angle) - player->plane.y * sinf(-player->angle),
-		old_plane.x * sinf(-player->angle) + player->plane.y * cosf(-player->angle)
+		player->plane.x * cosf(-angle) - player->plane.y * sinf(-angle),
+		old_plane.x * sinf(-angle) + player->plane.y * cosf(-angle)
 	);
 	//player->plane *=  SCALE;
-	print_player_info(window, player);
+	//print_player_info(window, player);
 }
 
 void handle_keyboard(SDL_KeyboardEvent* event, player* player, SDL_Window* window)
@@ -205,7 +207,8 @@ void render(SDL_Renderer* renderer, player* player)
 			distance = (mapX - player->pos.x + (1.0f - step_x) / 2.0f) / ray_dir.x;
 		else           
 			distance = (mapY - player->pos.y + (1.0f - step_y) / 2.0f) / ray_dir.y;
-		
+		if (map[(int)mapX][(int)mapY] == 5)
+			distance += 0.4;
 		int wall_height = (int)(WALL_HEIGHT / distance);
 		float brightness;
 		//brightness = (5.0f - vec2::distance(player->pos, vec2(mapX, mapY))) / 5.0f;
@@ -213,10 +216,62 @@ void render(SDL_Renderer* renderer, player* player)
 		if (brightness < 0) brightness = 0;
 		if (brightness > 1) brightness = 1;
 		//brightness = floor(brightness * 32) * 8;
-		brightness *= 255;
-		SDL_Color render_color = { brightness, brightness, brightness, 255 };
+		SDL_Color render_color = { brightness * 255, brightness * 255, brightness * 255, 255 };
+		if (map[(int)mapX][(int)mapY] == 5) {
+			render_color.r *= 0.2f;
+			render_color.g *= 0.8f;
+			render_color.b *= 0.9f;
+			render_color.a *= 1.0f;
+		}
+		
+		
+		
 		//if (map[mapX][mapY] == 5) render_color = { (Uint8)(brightness * 0.5f), (Uint8)(brightness * 0.2f), (Uint8)(brightness * 0.8f), 255 };
 		SDL_SetRenderDrawColor(renderer, render_color.r, render_color.g, render_color.b, render_color.a);
+		SDL_RenderDrawLine(renderer, x, RENDER_HEIGHT / 2 - wall_height, x, RENDER_HEIGHT / 2 + wall_height);
+	}
+}
+
+void render_new(SDL_Renderer* renderer, player* player, SDL_Window* window) {
+			
+	for (int x = 0; x < RENDER_WIDTH; x++)
+	{
+		vec2 ray = player->pos;
+		vec2 old = ray;
+
+		float raw_angle = ((float)x / RENDER_WIDTH) * FOV;
+		float angle = player->angle + raw_angle - FOV / 2;
+		float err = 0;
+
+		float stepX = cosf(angle);
+		float stepY = sinf(angle);
+
+		int rX = stepX > 0 ? 1 : -1;
+		int rY = stepY > 0 ? 1 : -1;
+
+		float distance = 0;
+		do {
+			if (!((int)ray.x > 0 && (int)ray.x < MAP_SIZE && (int)ray.y > 0 && (int)ray.y < MAP_SIZE))
+				break;
+			old = ray;
+			ray.x += rX * 0.1f;
+			ray.y += rY * 0.1f;
+			distance += 0.5;
+		} while (map[(int)ray.x][(int)ray.y] == 0);
+		ray = old;
+		do {
+			if (!((int)ray.x > 0 && (int)ray.x < MAP_SIZE && (int)ray.y > 0 && (int)ray.y < MAP_SIZE))
+				break;
+			ray.x += stepX * 0.01f;
+			ray.y += stepY*0.01f;
+			distance += 0.01f;
+		} while (map[(int)ray.x][(int)ray.y] == 0);
+
+		/*char buffer[256];
+		sprintf_s(buffer, "x = %f, y = %f, dis = %f", ray.x, ray.y, distance);
+		SDL_SetWindowTitle(window, buffer);*/
+
+		int wall_height = (int)(WALL_HEIGHT / distance);
 		SDL_RenderDrawLine(renderer, x, RENDER_HEIGHT / 2 - wall_height, x, RENDER_HEIGHT / 2 + wall_height);
 	}
 }
