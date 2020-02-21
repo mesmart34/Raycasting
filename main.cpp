@@ -216,7 +216,7 @@ void render(SDL_Renderer* renderer, player* player)
 		//brightness = floor(brightness * 32) * 8;
 		SDL_Color render_color = { brightness * 255, brightness * 255, brightness * 255, 255 };
 		if (map[(int)mapX][(int)mapY] == 5) {
-			render_color.r *= 0.8f;
+			render_color.r *= 0.2f;
 			render_color.g *= 0.8f;
 			render_color.b *= 0.1f;
 			render_color.a *= 1.0f;
