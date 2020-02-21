@@ -69,8 +69,6 @@ void handle_mouse(SDL_Window* window, SDL_MouseMotionEvent* event, player* playe
 		player->plane.x * cosf(-angle) - player->plane.y * sinf(-angle),
 		old_plane.x * sinf(-angle) + player->plane.y * cosf(-angle)
 	);
-	//player->plane *=  SCALE;
-	//print_player_info(window, player);
 }
 
 void handle_keyboard(SDL_KeyboardEvent* event, player* player, SDL_Window* window)

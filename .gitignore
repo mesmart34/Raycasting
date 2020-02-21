@@ -1,8 +1,23 @@
-  
-# ignore everything (dirs, files, sub-dirs, sub-files)
-/*
-# but do not ignore the .gitignore file
-!.gitignore
-!*.cpp
-!*.h
-!*.png
+# gitignore for C++
+# Compiled Object files
+*.slo
+*.lo
+*.o
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+
+# Visual Studio Files
+Debug
+Release
+*.suo
+*.csproj.user
+*.vbproj.user
+ipch
+*sdf
