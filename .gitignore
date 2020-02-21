@@ -14,7 +14,7 @@
 *.a
 
 # Visual Studio Files
-.vs
+/.vs
 
 Debug
 Release
