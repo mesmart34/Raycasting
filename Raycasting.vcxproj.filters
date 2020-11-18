@@ -3,8 +3,12 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="vec2.cpp" />
+    <ClCompile Include="stbi_image.cpp" />
+    <ClCompile Include="texture.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="vec2.h" />
+    <ClInclude Include="stbi_image.h" />
+    <ClInclude Include="texture.h" />
   </ItemGroup>
 </Project>
