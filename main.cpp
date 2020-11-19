@@ -1,35 +1,41 @@
-#include "SDL/SDL_main.h"
-#include "SDL/SDL.h"
-#include <cstdint>
-#include"vec2.h"
 #include <cmath>
 #include <cstdio>
 #include <map>
 #include <vector>
 #include <string>
+#include <cstdint>
+#include "SDL/SDL_main.h"
+#include "SDL/SDL.h"
+#include "vec2.h"
 #include "texture.h"
-#include <chrono>
+#include "input.h"
 
-using namespace std::chrono_literals;
 
-#define TEXTURED 1
 
-const int width = 640 / 2, height = width / 16 * 9;
-using namespace std;
+#define DEBUG_WALLS 0
+
+const float scale = 1.0f;
+const int width = 302 * scale, height = 160 * scale;
 
 const int map_size = 10;
-const int wall_height = height;
+const float fov_scale = 1.0;
+const int wall_height = height / fov_scale;
 
-constexpr std::chrono::nanoseconds timestep(16ms);
 
+float z_map[width];
+
+SDL_Renderer* renderer;
+SDL_Window* window;
+
+SDL_Texture* hud;
 
 struct player_t
 {
 	vec2 position = vec2(6.2, 2.20);
-	vec2 plane = vec2(0, 0.96);
+	vec2 plane = vec2(0, 0.96 * fov_scale);
 	vec2 direction = vec2(-1, 0);
 	float angle = 90;
-	float rot_speed = 0.011f;
+	float rot_speed = 0.0025f;
 	float mov_speed = 0.04f;
 	float radius = 0.5f;
 } player;
@@ -43,56 +49,8 @@ struct ray_t
 	int texture_x;
 	bool door;
 	bool door_side;
-	int door_x, door_y;
-	int hit_x, hit_y;
-	float door_distance;
-	int door_id;
+	bool invert_texture;
 };
-
-vector<float> z_map(width);
-std::map<string, texture_t> textures;
-
-void handle_mouse(SDL_Window* window, SDL_MouseMotionEvent* event, player_t* player)
-{
-	static int xpos = 0;
-	static int ypos = 0;
-	xpos = event->xrel;
-	ypos = event->yrel;
-	player->angle = xpos * player->rot_speed;
-	vec2 old_dir = player->direction;
-	player->direction = vec2(
-		player->direction.x * cosf(-player->angle) - player->direction.y * sinf(-player->angle),
-		old_dir.x * sinf(-player->angle) + player->direction.y * cosf(-player->angle)
-	);
-	vec2 old_plane = player->plane;
-	player->plane = vec2(
-		player->plane.x * cosf(-player->angle) - player->plane.y * sinf(-player->angle),
-		old_plane.x * sinf(-player->angle) + player->plane.y * cosf(-player->angle)
-	);
-}
-
-
-void handle_keyboard(SDL_KeyboardEvent* event, player_t* player, SDL_Window* window)
-{
-	float vel_x = 0.0f, vel_y = 0.0f;
-	if (event->keysym.scancode == SDL_SCANCODE_W)
-		vel_y = 1.0f;
-	if (event->keysym.scancode == SDL_SCANCODE_S)
-		vel_y = -1.0f;
-	if (event->keysym.scancode == SDL_SCANCODE_A)
-		vel_x = -1.0f;
-	if (event->keysym.scancode == SDL_SCANCODE_D)
-		vel_x = 1.0f;
-	player->position += vec2(player->direction.x * player->mov_speed * vel_y, player->direction.y * player->mov_speed * vel_y);
-	//player->position += vec2(player->direction.y * player->mov_speed * vel_x, player->direction.x * player->mov_speed * vel_x);
-}
-
-static void load_textures()
-{
-	textures["wall"] = texture_t("textures/wall.bmp");
-	textures["door_side"] = texture_t("textures/door_side.bmp");
-	textures["door"] = texture_t("textures/door.bmp");
-}
 
 static uint32_t pack_rgba(const uint8_t r, const uint8_t g, const uint8_t b, const uint8_t a)
 {
@@ -123,7 +81,7 @@ int world_map[map_size][map_size] =
   {1,0,0,0,0,0,0,0,0,1},
   {1,1,5,1,1,0,0,0,0,1},
   {1,0,0,0,1,0,0,0,0,1},
-  {1,0,0,0,1,0,0,0,0,1},
+  {1,0,0,0,5,0,0,0,0,1},
   {1,0,0,0,1,0,0,0,0,1},
   {1,0,0,0,1,0,0,0,0,1},
   {1,1,1,1,1,1,1,1,1,1}
@@ -135,16 +93,51 @@ static inline void draw_pixel(uint32_t* data, int x, int y, uint32_t color)
 		*(data + x + y * width) = color;
 }
 
-static bool intersects(const vec2& a, const vec2& b, const vec2& c, const vec2& d)
+static void process_door(int dir, float& map_x, float& map_y, vec2 side_dist, vec2 ray_dir, vec2 delta_dist, int& side, int step_x, int step_y, ray_t& ray, bool& hit)
 {
-	auto v1 = (d.x - c.x) * (a.y - c.y) - (c.y - c.y) * (a.x - c.x);
-	auto v2 = (d.x - c.x) * (b.x - c.y) - (c.y - c.y) * (b.x - c.x);
-	auto v3 = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-	auto v4 = (b.x - a.x) * (d.y - a.y) - (b.y - a.y) * (d.x - a.x);
-	return (v1 * v2 < 0) && (v3 * v4 < 0);
+	//need to backup by the end
+	auto last_x = map_x;
+	auto last_y = map_y;
+
+	auto distance = 0.0f;
+	auto hit_point = 0.0f;
+
+	//do an additional iteration to get next hit point, exactly like in cast_ray function but here we need the distance too
+	if (side_dist.x < side_dist.y)
+	{
+		map_x += step_x;
+		side = 0;
+		distance = (map_x - player.position.x + (1 - step_x) / 2) / ray_dir.x;
+	}
+	else
+	{
+		map_y += step_y;
+		side = 1;
+		distance = (map_y - player.position.y + (1 - step_y) / 2) / ray_dir.y;
+	}
+
+	//getting a hit point from an additional iteration 
+	if (side == 0)
+		hit_point = player.position.y + distance * ray_dir.y;
+	else
+		hit_point = player.position.x + distance * ray_dir.x;
+	hit_point -= floor((hit_point));
+
+	// getting the offset relative to direction a ray is casted with
+	auto offset = (dir == 0 ? ray_dir.x : ray_dir.y) > 0 ? 0.5 : 0.0;
+
+	//check if ray actually hit a thin wall
+	if (hit_point >= 0.0 + offset && hit_point < 0.5 + offset || (dir == 0 ? (last_x != map_x) : (last_y != map_y)))
+	{
+		side = dir;
+		map_x = last_x + (dir == 0 ? step_x * 0.5f : 0);
+		map_y = last_y + (dir == 1 ? step_y * 0.5f : 0);
+		ray.door = true;
+		hit = true;
+	}
 }
 
-static ray_t track_ray(const int x, const player_t& player)
+static ray_t cast_ray(const int x, const player_t& player)
 {
 	auto camera_x = 2 * x / (float)width - 1;
 	auto ray_dir = player.direction + player.plane * camera_x;
@@ -181,8 +174,7 @@ static ray_t track_ray(const int x, const player_t& player)
 		side_dist.y = (map_y + 1.0f - player.position.y) * delta_dist.y;
 	}
 	auto ray = ray_t();
-
-	while (!hit)
+	do
 	{
 		if (side_dist.x < side_dist.y)
 		{
@@ -199,69 +191,31 @@ static ray_t track_ray(const int x, const player_t& player)
 		}
 		if (world_map[(int)(map_x)][(int)(map_y)] == 5)
 		{	
-			auto last_x = map_x;
-			auto last_y = map_y;
-			auto last_side_dist = side_dist;
-			auto last_delta_dist = delta_dist;
-			if (side_dist.x < side_dist.y)
+			if (side == 1)
 			{
-				side_dist.x += delta_dist.x;
-				map_x += step_x;
-				side = 0;
-				distance = (map_x - player.position.x + (1 - step_x) / 2) / ray_dir.x;
-
+				process_door(1, map_x, map_y, side_dist, ray_dir, delta_dist, side, step_x, step_y, ray, hit);
+				if ((ray_dir.y > 0) && ray.door)
+					ray.invert_texture = true;
 			}
 			else
 			{
-				side_dist.y += delta_dist.y;
-				map_y += step_y;
-				side = 1;
-				distance = (map_y - player.position.y + (1 - step_y) / 2) / ray_dir.y;
-			}
-			double wallX;
-			if (side == 0) 
-				wallX = player.position.y + distance * ray_dir.y;
-			else           
-				wallX = player.position.x + distance * ray_dir.x;
-			wallX -= floor((wallX));
-			//printf("%f\n", wallX);
-			if (wallX >= 0.0 && wallX < 0.5f && last_x == map_x)
-			{
-				ray.door = true;
-				map_x = last_x + step_x * 0.5f;
-				map_y = last_y;
-				delta_dist = last_delta_dist;
-				side_dist = last_side_dist;
-				side = 0;
-				hit = true;
-			}
-			else {
-				if (world_map[(int)(map_x)][(int)(map_y)] != 1)
-				{
-					hit = true;
-					ray.door = true;
-					map_x = last_x;
-					map_x += step_x * 0.5f;
-					map_y = last_y;
-					delta_dist = last_delta_dist;
-					side_dist = last_side_dist;
-					
-				}
+				process_door(0, map_x, map_y, side_dist, ray_dir, delta_dist, side, step_x, step_y, ray, hit);
+				if ((ray_dir.x > 0) && ray.door)
+					ray.invert_texture = true;
 			}
 		}
 		if (world_map[(int)(map_x)][(int)(map_y)] == 1)
 		{
 			if ((world_map[(int)(map_x)][(int)(map_y - 1)] == 5 || world_map[(int)(map_x)][(int)(map_y + 1)] == 5) && side == 1)
 				ray.door_side = true;
+			if ((world_map[(int)(map_x - 1)][(int)(map_y)] == 5 || world_map[(int)(map_x + 1)][(int)(map_y)] == 5) && side == 0)
+				ray.door_side = true;
 			hit = true;
 		}
-	}
+	} while (!hit);
 
 	if (side == 0)
-	{
-		distance = (map_x - player.position.x + (1 - step_x) / 2);
-		distance /= ray_dir.x;
-	}
+		distance = (map_x - player.position.x + (1 - step_x) / 2) / ray_dir.x;
 	else
 		distance = (map_y - player.position.y + (1 - step_y) / 2) / ray_dir.y;
 	auto wall_x = 0.0f;
@@ -287,31 +241,42 @@ static ray_t track_ray(const int x, const player_t& player)
 
 static void render_textured_strip(uint32_t* data, const int x, const ray_t& ray, const player_t& player)
 {
-	auto texture = textures["wall"];
+	auto texture = Texture::get_texture("wall");
 
 	if (ray.door)
 	{
-		texture = textures["door"];
+		texture = Texture::get_texture("door");
 	}
 	else if (ray.door_side)
 	{
-		texture = textures["door_side"];
+		texture = Texture::get_texture("door_side");
 	}
 	auto line_height = (int)((wall_height - 1) / ray.distance);
 
 	auto start = height / 2 - line_height / 2;
 	auto end = height / 2 + line_height / 2;
 
-	auto step = 1.0f * texture.height / line_height;
-	auto texture_pos = (start - end - 0.001) * step;
-	auto column = texture.get_scaled_column(ray.texture_x, line_height);
+	auto step = 1.0f * texture.get_height() / line_height;
+	auto texture_pos = (start - end) * step;
+	auto column = texture.get_scaled_column(ray.invert_texture ? (texture.get_width() - ray.texture_x - 1) : ray.texture_x, line_height);
 	for (auto y = start; y < end; y++)
 	{
 		auto color = column[y - start];
-		if (ray.side == 1) 
+		if (ray.side == 1 && !(ray.door || ray.door_side))
 			color = (color >> 1) & 8355711;
 		draw_pixel(data, x, y, color);
 	}
+}
+
+static void load_textures()
+{
+	Texture::load_texture("wall", "textures/wall.bmp");
+	Texture::load_texture("door", "textures/door.bmp");
+	Texture::load_texture("door_side", "textures/door_side.bmp");
+	auto surface = SDL_LoadBMP("textures/hud_base.bmp");
+
+	hud = SDL_CreateTextureFromSurface(renderer, surface);
+	SDL_FreeSurface(surface);
 }
 
 static void render_solid_strip(uint32_t* data, const int x, const ray_t& ray)
@@ -331,86 +296,94 @@ static void render_solid_strip(uint32_t* data, const int x, const ray_t& ray)
 	}
 }
 
+static void draw_ui()
+{
+	SDL_RenderCopy(renderer, hud, nullptr, nullptr);
+}
+
 static void render(uint32_t *data, const player_t& player)
 {
 	draw_background(data);
 	for (auto x = 0; x < width; x++)
 	{
-		auto ray = track_ray(x, player);
+		auto ray = cast_ray(x, player);
 		z_map[x] = ray.distance;
 		if (ray.hit)
 		{
-			if(TEXTURED)
-				render_textured_strip(data, x, ray, player);
-			else
+			if(DEBUG_WALLS)
 				render_solid_strip(data, x, ray);
+			else
+				render_textured_strip(data, x, ray, player);
 		}
 	}
 }
 
+static void update(player_t& player)
+{
+	player.angle = input::get_mouse_axis().x * player.rot_speed;
+	vec2 old_dir = player.direction;
+	player.direction = vec2(
+		player.direction.x * cosf(-player.angle) - player.direction.y * sinf(-player.angle),
+		old_dir.x * sinf(-player.angle) + player.direction.y * cosf(-player.angle)
+	);
+	vec2 old_plane = player.plane;
+	player.plane = vec2(
+		player.plane.x * cosf(-player.angle) - player.plane.y * sinf(-player.angle),
+		old_plane.x * sinf(-player.angle) + player.plane.y * cosf(-player.angle)
+	);
+
+	auto speed = player.mov_speed;
+	if (input::get_key(SDL_SCANCODE_W))
+		player.position += vec2(player.direction.x * speed, player.direction.y * speed);
+	if (input::get_key(SDL_SCANCODE_S))
+		player.position += vec2(player.direction.x * -speed, player.direction.y * -speed);
+	if (input::get_key(SDL_SCANCODE_A))
+		player.position += vec2(player.direction.y * -speed, player.direction.x * speed);
+	if (input::get_key(SDL_SCANCODE_D))
+		player.position += vec2(player.direction.y * speed, player.direction.x * -speed);
+}
 
 
 int main(int argc, char** argv)
 {
 	SDL_Init(SDL_INIT_EVERYTHING);
-	auto window = SDL_CreateWindow("Wolfenstein 3D", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 800, 600, SDL_WINDOW_RESIZABLE );
-	auto renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-	SDL_RenderSetLogicalSize(renderer, width, height);
+	window = SDL_CreateWindow("Wolfenstein 3D", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 800, 600, SDL_WINDOW_RESIZABLE );
+	renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+	SDL_RenderSetLogicalSize(renderer, 320, 200);
 	auto texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, width, height);
 	SDL_SetRelativeMouseMode(SDL_TRUE);
 	auto interrupted = false;
 	load_textures();
 
-	using clock = std::chrono::high_resolution_clock;
-
-	std::chrono::nanoseconds lag(0ns);
-	auto time_start = clock::now();
-	bool quit_game = false;
-
-
 	while (!interrupted) {
-		auto delta_time = clock::now() - time_start;
-		time_start = clock::now();
-		lag += std::chrono::duration_cast<std::chrono::nanoseconds>(delta_time);
-
 		auto event = SDL_Event();
 		while (SDL_PollEvent(&event))
 		{
 			switch (event.type)
 			{
-			case SDL_KEYDOWN:
-			{
-				if (event.key.keysym.scancode == SDL_SCANCODE_ESCAPE)
-					interrupted = true;
-				handle_keyboard(&event.key, &player, window);
-			} break;
-			case SDL_MOUSEMOTION:
-			{
-				handle_mouse(window, &event.motion, &player);
-			} break;
+				case SDL_KEYDOWN:
+				{
+					if (event.key.keysym.scancode == SDL_SCANCODE_ESCAPE)
+						interrupted = true;
+				} break;
 			}
 		}
 
-		// update game logic as lag permits
-		while (lag >= timestep) {
-			lag -= timestep;
-
-			
-			//update(&current_state); // update at a fixed rate each time
-		}
-
-		// calculate how close or far we are from the next timestep
-		/*auto alpha = (float)lag.count() / timestep.count();
-		auto interpolated_state = interpolate(current_state, previous_state, alpha);*/
+		input::update();
+		update(player);
 
 		SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0);
 		SDL_RenderClear(renderer);
+		draw_ui();
+
 		auto data = new uint32_t[width * height];
 		render(data, player);
 		SDL_UpdateTexture(texture, nullptr, &data[0], sizeof(uint32_t) * width);
-		SDL_RenderCopy(renderer, texture, nullptr, nullptr);
+		SDL_Rect dst = {0, 0, 320, 160};
+		SDL_RenderCopy(renderer, texture, nullptr, &dst);
 		SDL_RenderPresent(renderer);
 		delete data;
+		SDL_Delay(1000 / 60);
 	}
 
 
@@ -419,3 +392,4 @@ int main(int argc, char** argv)
 	SDL_Quit();
 	return 0;
 }
+

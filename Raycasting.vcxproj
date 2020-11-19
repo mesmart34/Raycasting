@@ -129,12 +129,18 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="input.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="player.cpp" />
     <ClCompile Include="stbi_image.cpp" />
     <ClCompile Include="texture.cpp" />
     <ClCompile Include="vec2.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="door.h" />
+    <ClInclude Include="globals.h" />
+    <ClInclude Include="input.h" />
+    <ClInclude Include="player.h" />
     <ClInclude Include="stbi_image.h" />
     <ClInclude Include="texture.h" />
     <ClInclude Include="vec2.h" />
