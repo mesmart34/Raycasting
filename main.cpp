@@ -4,19 +4,24 @@
 #include <vector>
 #include <string>
 #include <cstdint>
-#include "SDL/SDL_main.h"
-#include "SDL/SDL.h"
+
 #include "vec2.h"
 #include "texture.h"
 #include "input.h"
 
+//#define OPEN_GL
 
+#include "SDL/SDL_main.h"
+#include "SDL/SDL.h"
+
+#ifdef OPEN_GL
+	#include "GL/glew.h"
+#endif
 
 #define DEBUG_WALLS 0
 
-const float scale = 1.0f;
-const int width = 302 * scale, height = 160 * scale;
-
+const float scale = 0.75f;
+const int width = 320 * scale, height = 210 * scale;
 const int map_size = 10;
 const float fov_scale = 1.0;
 const int wall_height = height / fov_scale;
@@ -28,6 +33,11 @@ SDL_Renderer* renderer;
 SDL_Window* window;
 
 SDL_Texture* hud;
+
+struct Rect
+{
+	float x, y, w, h;
+};
 
 struct player_t
 {
@@ -50,7 +60,14 @@ struct ray_t
 	bool door;
 	bool door_side;
 	bool invert_texture;
+	float texture_offset;
 };
+
+struct object_t
+{
+	int id;
+	vec2 position;
+} officer{ 3, vec2(3, 3) };
 
 static uint32_t pack_rgba(const uint8_t r, const uint8_t g, const uint8_t b, const uint8_t a)
 {
@@ -78,12 +95,12 @@ int world_map[map_size][map_size] =
   {1,1,1,1,1,1,1,1,1,1},
   {1,0,0,0,0,0,0,0,0,1},
   {1,0,0,0,0,0,0,0,0,1},
-  {1,0,0,0,0,0,0,0,0,1},
-  {1,1,5,1,1,0,0,0,0,1},
-  {1,0,0,0,1,0,0,0,0,1},
-  {1,0,0,0,5,0,0,0,0,1},
-  {1,0,0,0,1,0,0,0,0,1},
-  {1,0,0,0,1,0,0,0,0,1},
+  {1,0,0,0,0,0,0,1,0,1},
+  {1,1,5,1,1,5,1,1,0,1},
+  {1,0,0,0,1,0,0,5,0,1},
+  {1,0,0,0,5,0,0,1,0,1},
+  {1,0,0,0,1,0,0,5,0,1},
+  {1,0,0,0,1,0,0,1,0,1},
   {1,1,1,1,1,1,1,1,1,1}
 };
 
@@ -93,7 +110,7 @@ static inline void draw_pixel(uint32_t* data, int x, int y, uint32_t color)
 		*(data + x + y * width) = color;
 }
 
-static void process_door(int dir, float& map_x, float& map_y, vec2 side_dist, vec2 ray_dir, vec2 delta_dist, int& side, int step_x, int step_y, ray_t& ray, bool& hit)
+static bool process_door(int dir, float& map_x, float& map_y, vec2 side_dist, vec2 ray_dir, vec2 delta_dist, int& side, int step_x, int step_y, ray_t& ray, bool& hit)
 {
 	//need to backup by the end
 	auto last_x = map_x;
@@ -102,6 +119,12 @@ static void process_door(int dir, float& map_x, float& map_y, vec2 side_dist, ve
 	auto distance = 0.0f;
 	auto hit_point = 0.0f;
 
+	auto state_hit_point = 0.0f;
+	if (side == 0)
+		state_hit_point = player.position.y + ((map_x + step_x * 0.5f - player.position.x + (1 - step_x) / 2) / ray_dir.x) * ray_dir.y;
+	else
+		state_hit_point = player.position.x + ((map_y + step_y * 0.5f - player.position.y + (1 - step_y) / 2) / ray_dir.y) * ray_dir.x;
+	state_hit_point -= floor((state_hit_point));
 	//do an additional iteration to get next hit point, exactly like in cast_ray function but here we need the distance too
 	if (side_dist.x < side_dist.y)
 	{
@@ -123,17 +146,32 @@ static void process_door(int dir, float& map_x, float& map_y, vec2 side_dist, ve
 		hit_point = player.position.x + distance * ray_dir.x;
 	hit_point -= floor((hit_point));
 
-	// getting the offset relative to direction a ray is casted with
+	// getting the offset relative to the direction a ray is casted with
 	auto offset = (dir == 0 ? ray_dir.x : ray_dir.y) > 0 ? 0.5 : 0.0;
+
+	auto opening_offset = 0.3f;
+	auto texture_offset = opening_offset;
 
 	//check if ray actually hit a thin wall
 	if (hit_point >= 0.0 + offset && hit_point < 0.5 + offset || (dir == 0 ? (last_x != map_x) : (last_y != map_y)))
 	{
+		//printf("%f\n", player_frac);
+		if (state_hit_point < opening_offset)
+		{
+				map_x = last_x ;
+
+				map_y = last_y;
+			return false;
+		}
 		side = dir;
-		map_x = last_x + (dir == 0 ? step_x * 0.5f : 0);
-		map_y = last_y + (dir == 1 ? step_y * 0.5f : 0);
+		ray.texture_offset = texture_offset;
 		ray.door = true;
 		hit = true;
+		map_x = last_x + (dir == 0 ? step_x * 0.5f : 0);
+		map_y = last_y + (dir == 1 ? step_y * 0.5f : 0);
+
+		return true;
+
 	}
 }
 
@@ -176,6 +214,8 @@ static ray_t cast_ray(const int x, const player_t& player)
 	auto ray = ray_t();
 	do
 	{
+		auto last_x = map_x;
+		auto last_y = map_y;
 		if (side_dist.x < side_dist.y)
 		{
 			side_dist.x += delta_dist.x;
@@ -193,15 +233,22 @@ static ray_t cast_ray(const int x, const player_t& player)
 		{	
 			if (side == 1)
 			{
-				process_door(1, map_x, map_y, side_dist, ray_dir, delta_dist, side, step_x, step_y, ray, hit);
-				if ((ray_dir.y > 0) && ray.door)
-					ray.invert_texture = true;
+
+				//Y Door
+				if (process_door(1, map_x, map_y, side_dist, ray_dir, delta_dist, side, step_x, step_y, ray, hit))
+				{
+					if ((ray_dir.y > 0) && ray.door)
+						ray.invert_texture = true;
+				}
 			}
 			else
 			{
-				process_door(0, map_x, map_y, side_dist, ray_dir, delta_dist, side, step_x, step_y, ray, hit);
-				if ((ray_dir.x > 0) && ray.door)
-					ray.invert_texture = true;
+				//X Door
+				if (process_door(0, map_x, map_y, side_dist, ray_dir, delta_dist, side, step_x, step_y, ray, hit))
+				{
+					if ((ray_dir.x > 0) && ray.door)
+						ray.invert_texture = true;
+				}
 			}
 		}
 		if (world_map[(int)(map_x)][(int)(map_y)] == 1)
@@ -225,7 +272,7 @@ static ray_t cast_ray(const int x, const player_t& player)
 		wall_x = player.position.x + distance * ray_dir.x;
 	wall_x -= std::floorf(wall_x);
 
-	auto texture_x = (int)(wall_x * (float)64);
+	auto texture_x = (int)(wall_x * (float)64) - ray.texture_offset * 64;
 	if (side == 0 && ray_dir.x > 0)
 		texture_x = 64 - texture_x - 1;
 	if (side == 1 && ray_dir.y < 0)
@@ -256,9 +303,8 @@ static void render_textured_strip(uint32_t* data, const int x, const ray_t& ray,
 	auto start = height / 2 - line_height / 2;
 	auto end = height / 2 + line_height / 2;
 
-	auto step = 1.0f * texture.get_height() / line_height;
-	auto texture_pos = (start - end) * step;
-	auto column = texture.get_scaled_column(ray.invert_texture ? (texture.get_width() - ray.texture_x - 1) : ray.texture_x, line_height);
+	auto invert_texture = ray.side == 0 ? ray.invert_texture : !ray.invert_texture;
+	auto column = texture.get_scaled_column(invert_texture ? (texture.get_width() - ray.texture_x - 1) : ray.texture_x, line_height, true);
 	for (auto y = start; y < end; y++)
 	{
 		auto color = column[y - start];
@@ -273,8 +319,8 @@ static void load_textures()
 	Texture::load_texture("wall", "textures/wall.bmp");
 	Texture::load_texture("door", "textures/door.bmp");
 	Texture::load_texture("door_side", "textures/door_side.bmp");
+	Texture::load_texture("officer", "textures/officer.bmp");
 	auto surface = SDL_LoadBMP("textures/hud_base.bmp");
-
 	hud = SDL_CreateTextureFromSurface(renderer, surface);
 	SDL_FreeSurface(surface);
 }
@@ -296,9 +342,58 @@ static void render_solid_strip(uint32_t* data, const int x, const ray_t& ray)
 	}
 }
 
-static void draw_ui()
+static void draw_sprite(uint32_t* data, const player_t& player)
 {
-	SDL_RenderCopy(renderer, hud, nullptr, nullptr);
+	const int texWidth = 64;
+	const int texHeight = 64;
+	auto sprite_x = officer.position.x - player.position.x;
+	auto sprite_y = officer.position.y - player.position.y;
+
+	double invDet = 1.0 / (player.plane.x * player.direction.y - player.direction.x * player.plane.y);
+
+	double transformX = invDet * (player.direction.y * sprite_x - player.direction.x * sprite_y);
+	double transformY = invDet * (-player.plane.y * sprite_x + player.plane.x * sprite_y); //this is actually the depth inside the screen, that what Z is in 3D, the distance of sprite to player, matching sqrt(spriteDistance[i])
+
+	int spriteScreenX = int((width / 2) * (1 + transformX / transformY));
+
+	//parameters for scaling and moving the sprites
+#define uDiv 1
+#define vDiv 1
+#define vMove 0.0
+	int vMoveScreen = int(vMove / transformY);
+
+	//calculate height of the sprite on screen
+	int spriteHeight = abs(int(height / (transformY))) / vDiv; //using "transformY" instead of the real distance prevents fisheye
+	//calculate lowest and highest pixel to fill in current stripe
+	int drawStartY = -spriteHeight / 2 + height / 2 + vMoveScreen;
+	if (drawStartY < 0) drawStartY = 0;
+	int drawEndY = spriteHeight / 2 + height / 2 + vMoveScreen;
+	if (drawEndY >= height) drawEndY = height - 1;
+
+	//calculate width of the sprite
+	int spriteWidth = abs(int(height / (transformY))) / uDiv;
+	int drawStartX = -spriteWidth / 2 + spriteScreenX;
+	if (drawStartX < 0) drawStartX = 0;
+	int drawEndX = spriteWidth / 2 + spriteScreenX;
+	if (drawEndX >= width) drawEndX = width - 1;
+	auto texture = Texture::get_texture("officer");
+
+	//loop through every vertical stripe of the sprite on screen
+	for (int stripe = drawStartX; stripe < drawEndX; stripe++)
+	{
+		int texX = int(16 * (stripe - (-spriteWidth / 2 + spriteScreenX)) * texWidth / spriteWidth) / 16;
+		auto column = texture.get_scaled_column(texX, spriteHeight, false);
+		if (transformY > 0 && stripe > 0 && stripe < width && transformY < z_map[stripe])
+		{
+			for (auto y = drawStartY; y < drawEndY; y++)
+			{
+				auto color = column[y - drawStartY];
+				if(color != 0xFFFF00FF)
+					draw_pixel(data, stripe, y, color);
+			}
+		}
+	}
+
 }
 
 static void render(uint32_t *data, const player_t& player)
@@ -316,6 +411,14 @@ static void render(uint32_t *data, const player_t& player)
 				render_textured_strip(data, x, ray, player);
 		}
 	}
+	draw_sprite(data, player);
+}
+
+static int sign(int v)
+{
+	if (v < 0)
+		return -1;
+	return 1;
 }
 
 static void update(player_t& player)
@@ -332,17 +435,80 @@ static void update(player_t& player)
 		old_plane.x * sinf(-player.angle) + player.plane.y * cosf(-player.angle)
 	);
 
+
 	auto speed = player.mov_speed;
+	auto new_pos = player.position;
 	if (input::get_key(SDL_SCANCODE_W))
-		player.position += vec2(player.direction.x * speed, player.direction.y * speed);
+		new_pos += vec2(player.direction.x * speed, player.direction.y * speed);
 	if (input::get_key(SDL_SCANCODE_S))
-		player.position += vec2(player.direction.x * -speed, player.direction.y * -speed);
+		new_pos += vec2(player.direction.x * -speed, player.direction.y * -speed);
 	if (input::get_key(SDL_SCANCODE_A))
-		player.position += vec2(player.direction.y * -speed, player.direction.x * speed);
+		new_pos += vec2(player.direction.y * -speed, player.direction.x * speed);
 	if (input::get_key(SDL_SCANCODE_D))
-		player.position += vec2(player.direction.y * speed, player.direction.x * -speed);
+		new_pos += vec2(player.direction.y * speed, player.direction.x * -speed);
+	player.position = new_pos;
 }
 
+
+#ifdef OPEN_GL
+
+
+int main(int argc, char** argv)
+{
+	SDL_Init(SDL_INIT_EVERYTHING);
+	window = SDL_CreateWindow("Wolfenstein 3D", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 800, 600, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL);
+
+	auto context = SDL_GL_CreateContext(window);
+
+	glewInit();
+
+	SDL_SetRelativeMouseMode(SDL_TRUE);
+	auto interrupted = false;
+	load_textures();
+
+	glClearColor(0, 0, 0, 0);
+	while (!interrupted) {
+		auto event = SDL_Event();
+		while (SDL_PollEvent(&event))
+		{
+			switch (event.type)
+			{
+			case SDL_KEYDOWN:
+			{
+				if (event.key.keysym.scancode == SDL_SCANCODE_ESCAPE)
+					interrupted = true;
+			} break;
+			case SDL_WINDOWEVENT:
+			{
+				if (event.window.event == SDL_WINDOWEVENT_RESIZED)
+					glViewport(0, 0, width, height);
+			} break;
+			}
+		}
+		glClear(GL_COLOR_BUFFER_BIT);
+
+		input::update();
+		update(player);
+
+		auto data = new uint32_t[width * height];
+		render(data, player);
+
+		glDrawPixels(width, height, GL_RGBA, GL_UNSIGNED_BYTE, (void*)&data[0]);
+		delete data;
+
+		SDL_GL_SwapWindow(window);
+		SDL_GL_SetSwapInterval(2);
+		//SDL_Delay(1000 / 60);
+	}
+
+
+	SDL_DestroyRenderer(renderer);
+	SDL_DestroyWindow(window);
+	SDL_Quit();
+	return 0;
+}
+
+#else
 
 int main(int argc, char** argv)
 {
@@ -372,9 +538,10 @@ int main(int argc, char** argv)
 		input::update();
 		update(player);
 
-		SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0);
+		SDL_SetRenderDrawColor(renderer, 0, 64, 64, 255);
 		SDL_RenderClear(renderer);
-		draw_ui();
+
+		SDL_RenderCopy(renderer, hud, nullptr, nullptr);
 
 		auto data = new uint32_t[width * height];
 		render(data, player);
@@ -383,7 +550,7 @@ int main(int argc, char** argv)
 		SDL_RenderCopy(renderer, texture, nullptr, &dst);
 		SDL_RenderPresent(renderer);
 		delete data;
-		SDL_Delay(1000 / 60);
+		SDL_Delay(1000 / 120);
 	}
 
 
@@ -393,3 +560,4 @@ int main(int argc, char** argv)
 	return 0;
 }
 
+#endif

@@ -90,12 +90,12 @@
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>F:\Users\artem\Documents\vs projects\SDL\include;F:\Users\artem\Documents\vs projects\SDL2_ttf-2.0.15\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>F:\Users\artem\Documents\vs projects\SDL\include;F:\Users\artem\Documents\vs projects\SDL2_ttf-2.0.15\include;F:\Users\artem\Documents\vs projects\GLFW\GLFW\GLFW;F:\Users\artem\Documents\vs projects\glew-2.1.0\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <AdditionalLibraryDirectories>F:\Users\artem\Documents\vs projects\SDL\lib\x64;F:\Users\artem\Documents\vs projects\SDL2_ttf-2.0.15\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>SDL2.lib;SDL2main.lib;SDL2_ttf.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>F:\Users\artem\Documents\vs projects\SDL\lib\x64;F:\Users\artem\Documents\vs projects\SDL2_ttf-2.0.15\lib\x64;F:\Users\artem\Documents\vs projects\GLFW\lib;F:\Users\artem\Documents\vs projects\glew-2.1.0\lib\Release\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>SDL2.lib;SDL2main.lib;SDL2_ttf.lib;glu32.lib;opengl32.lib;glfw3.lib;glew32.lib;glfw3dll.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">

@@ -17,12 +17,15 @@ const uint32_t Texture::get_color(int x, int y)
     return *(data + x + y * width);
 }
 
-const std::vector<uint32_t> Texture::get_scaled_column(const int texture_coord, const int height)
+const std::vector<uint32_t> Texture::get_scaled_column(const int texture_coord, const int height, bool rotate)
 {
 	auto column = std::vector<uint32_t>(height);
 	for (auto y = 0; y < height; y++) {
-		auto _y = (y * width) / height;
-		column[y] = get_color(_y, texture_coord);
+		auto _y = (int)((float)(y * 64) / (float)height);
+		if(rotate)
+			column[y] = get_color(_y, texture_coord);
+		else
+			column[y] = get_color(texture_coord, _y);
 	}
 	return column;
 }

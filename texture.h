@@ -16,7 +16,7 @@ public:
 
 	const uint32_t get_color(int x, int y);
 
-	const std::vector<uint32_t> get_scaled_column(const int texture_coord, const int height);
+	const std::vector<uint32_t> get_scaled_column(const int texture_coord, const int height, bool rotate);
 
 	const static Texture& get_texture(std::string name);
 
